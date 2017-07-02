@@ -1,30 +1,329 @@
 ---
 title: "Practical Machine Learning Course Project"
 author: "Brett Addison"
-date: "July 1, 2017"
-output: html_document
+date: "July 2, 2017"
+output: 
+  html_document: 
+    keep_md: yes
+fig_caption: true
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+##**Executive Summary**
+In this project, I quantify how well 6 participants perform barbell lifts. To accomplish this task, I use data collected from accelerometers located on the belt, forearm, arm, and dumbell to train a few different machine learning prediction models. I then evaluated the accuracy of the models. I found that the random forest model had the highest accuracy, >99%. I then used this model to predict on 20 different test cases. My model was successful in predicting all 20 cases.
+
+##**Background**
+Currently there exist many devices on the market, such as Fitbit, Gear Fit, Apple Watch Nike+, etc., that tract personal activities. A significant number of health enthusiats and tech geeks alike regularly take measurements during workout routines to track their fitness and to improve their health. People are generally good at quantifying how much of a particular activity they do, but they rarely quantify how well they do it. The goal of this project is to use data obtained from accelerometers on the belt, forearm, arm, and dumbell of 6 participants to predict how well they performed barbell lifts. These participants were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: <http://groupware.les.inf.puc-rio.br/har> (see the section on the Weight Lifting Exercise Dataset).
+
+A short discription of the data set as described on the above mentioned website is as follows:
+
+"Six young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E).
+
+Class A corresponds to the specified execution of the exercise, while the other 4 classes correspond to common mistakes. Participants were supervised by an experienced weight lifter to make sure the execution complied to the manner they were supposed to simulate. The exercises were performed by six male participants aged between 20-28 years, with little weight lifting experience. We made sure that all participants could easily simulate the mistakes in a safe and controlled manner by using a relatively light dumbbell (1.25kg)."
+
+Read more: http://groupware.les.inf.puc-rio.br/har#ixzz4ldfRAOXH
+
+The training data for this project are available here:
+<https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv>
+
+The test data are available here:
+<https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv>
+
+The data for this project come from this source: <http://groupware.les.inf.puc-rio.br/har>. I would like to thank the authors of this study, Velloso et al. (2013), for their generousity in allowing their data to be used in my assignment.
+
+##**Exploratory Data Analysis**
+###Setting Up the Environment
+First I loaded the required packages to perform the data analysis.
+```{r results='hide', message=FALSE, warning=FALSE, echo=TRUE}
+library(ggplot2)
+library(plyr)
+library(knitr)
+library(caret)
+library(lubridate)
+library(parallel)
+library(doParallel)
+library(rattle)
+library(gbm)
+library(e1071)
+library(rpart)
+library(rpart.plot)
+library(corrplot)
 ```
 
-## R Markdown
+Next I downloaded and read into R the training and test data sets.
+```{r results='hide', message=FALSE, warning=FALSE, echo=TRUE}
+urlTraining <- 'https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv'
+urlTesting <- 'https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv'
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
-
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
-
-```{r cars}
-summary(cars)
+#Read in the training and testing datasets into R. Convert blank "" values into NA values.
+training_data <- read.csv(url(urlTraining), na.strings=c("", "NA"))
+testing_data <- read.csv(url(urlTesting), na.strings=c("", "NA"))
 ```
 
-## Including Plots
+###Data Partitioning
+Here I partition the training data into a training set and a validation set, (70% training and 30% validation). 
+```{r results='hide', message=FALSE, warning=FALSE, echo=TRUE}
+set.seed(1000)
 
-You can also embed plots, for example:
+inBuild <- createDataPartition(y=training_data$classe, p=0.7, list=FALSE)
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+validation <- training_data[-inBuild,]
+training <- training_data[inBuild,]
+training2 <- training_data       #Full training data set to build most accurate final prediction model on.
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+###Cleaning Data
+These data sets consist of a large number of variables, 160 to be exact. A significant number of the variables contain lots of NA's and blank data. These variables should be removed from the data sets otherwise model fitting will be difficult or next to impossible. When I read in the data, I specified that blank data "" should be converted to NA. Additionally, the first five columns are identification and user name only variables. I will remove these columns first, then I will remove all the columns that contain NA data.
+```{r results='hide', message=FALSE, warning=FALSE, echo=TRUE}
+training <- training[,-(1:5)]
+training2 <- training2[,-(1:5)]
+validation <- validation[,-(1:5)]
+testing_data <- testing_data[,-(1:5)]
+
+#Find columns with NA values in training set and remove those same columns in the validation
+#and testing data.
+any_NA_columns <- apply(training, 2, function(x)any(is.na(x)))
+col_nums_missing <- which(any_NA_columns==TRUE)
+
+trainingCleaned <- training[,-col_nums_missing]
+trainingCleaned2 <- training2[,-col_nums_missing]
+validationCleaned <- validation[,-col_nums_missing]
+testingCleaned <- testing_data[,-col_nums_missing]
+
+#Remove new_window and num_window columns, the first two columns.
+trainingCleaned <- trainingCleaned[, -(1:2)]
+trainingCleaned2 <- trainingCleaned2[, -(1:2)]
+validationCleaned <- validationCleaned[,-(1:2)]
+testingCleaned <- testingCleaned[,-(1:2)]
+```
+
+There are now 53 variables in each data set.
+```{r, message=FALSE, warning=FALSE, echo=TRUE}
+dim(trainingCleaned)
+```
+
+Finally, the classe variable (the one that indicates how well the routine was performed) needs to be converted to a factor variable since it is not a continuous variable.
+```{r results='hide', message=FALSE, warning=FALSE, echo=TRUE}
+trainingCleaned$classe <- as.factor(trainingCleaned$classe)
+trainingCleaned2$classe <- as.factor(trainingCleaned2$classe)
+validationCleaned$classe <- as.factor(validationCleaned$classe)
+
+# set up training run for x / y syntax because model format performs poorly when running model in parallel.
+x <- trainingCleaned[,-53]
+y <- trainingCleaned[,53]
+
+x2 <- trainingCleaned2[,-53]
+y2 <- trainingCleaned2[,53]
+```
+
+###Correlation and Principle Component Analysis
+Due to the shear number of variables in this data set, it is worth determining if any of the variables are not needed as a predictor for the models.
+```{r, message=FALSE, warning=FALSE, echo=TRUE}
+corMatrix <- cor(trainingCleaned[, -53])
+```
+
+```{r, echo=TRUE, eval=TRUE, warning=FALSE, fig.height = 7, fig.align='center', fig.cap="Fig. 1: Correlations between variables for the training data set. Red indicates variables that are highly correlated with each other while blue indicates variables that are negatively correlated."}
+corrplot(corMatrix, method="color", type="lower", order = "FPC", tl.cex = 0.6, tl.col = "black")
+```
+
+Here I perform principle component analysis and plot the results below.
+```{r, message=FALSE, warning=FALSE, echo=TRUE}
+trainingCleanedLog <- log(abs(trainingCleaned[, 1:dim(trainingCleaned)[2]-1])+1)
+classeVar <- trainingCleaned[, dim(trainingCleaned)[2]]
+trainingPCA <- prcomp(trainingCleanedLog, center=TRUE, scale.=TRUE)
+summary(trainingPCA)
+```
+
+```{r, echo=TRUE, eval=TRUE, warning=FALSE, fig.height = 6, fig.align='center', fig.cap="Fig. 2: A plot showing the amount of variability in the data from the top ten principle components."}
+plot(trainingPCA, type='l')
+```
+
+As shown in Figure 2, the first two principle components contribute to the majority of the variability in the data. However, it appears there are a significant number of variables that contribute almost equally to the variability thus I will not eliminate any variables in the analysis.
+
+##**Building Predictive Models**
+In this section, I will build four predictive models using the training data set and test them with the validation data set. I then chose the best model, fit it with the complete training data set to build the most accurate model, and apply it to predict on the test data for the classe variable.
+
+###Random Forest Model
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+#First configure for parallel processing for faster processing.
+cluster <- makeCluster(detectCores() - 1)     #convention to leave 1 core for OS
+registerDoParallel(cluster)
+```
+
+```{r, message=FALSE, warning=FALSE, echo=TRUE}
+#Create a trainControl function with a 10 fold cross validation.
+fitControl <- trainControl(method = "cv", number = 10, allowParallel = TRUE)
+#Fit model to training data.
+modFitRF <- train(x, y, data=trainingCleaned, method="rf", trControl=fitControl)
+```
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+#Shut down the parallel cluster.
+stopCluster(cluster)
+registerDoSEQ()
+```
+
+```{r, message=FALSE, warning=FALSE, echo=TRUE}
+#Print the model accuracy.
+print(confusionMatrix.train(modFitRF))
+```
+
+```{r, message=FALSE, warning=FALSE, echo=TRUE}
+#Now predict on the validation data set.
+predRF <- predict(modFitRF, newdata = validationCleaned)
+print(confusionMatrix(predRF, validationCleaned$classe))
+```
+
+###Linear Discriminant Model
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+#First configure for parallel processing for faster processing.
+cluster <- makeCluster(detectCores() - 1)     #convention to leave 1 core for OS
+registerDoParallel(cluster)
+```
+
+```{r, message=FALSE, warning=FALSE, echo=TRUE}
+#Create a trainControl function with a 10 fold cross validation.
+fitControl <- trainControl(method = "cv", number = 10, allowParallel = TRUE)
+#Fit model to training data.
+modFitLDA <- train(x, y, data=trainingCleaned, method="lda", trControl=fitControl)
+```
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+#Shut down the parallel cluster.
+stopCluster(cluster)
+registerDoSEQ()
+```
+
+```{r, message=FALSE, warning=FALSE, echo=TRUE}
+#Print the model accuracy.
+print(confusionMatrix.train(modFitLDA))
+```
+
+```{r, message=FALSE, warning=FALSE, echo=TRUE}
+#Now predict on the validation data set.
+predLDA <- predict(modFitLDA, newdata = validationCleaned)
+print(confusionMatrix(predLDA, validationCleaned$classe))
+```
+
+###Decision Trees Model
+```{r, message=FALSE, warning=FALSE, echo=TRUE}
+#Fit model to training data.
+modFitRPART <- rpart(classe ~ ., data=trainingCleaned, method="class")
+```
+
+```{r, message=FALSE, warning=FALSE, echo=TRUE}
+#Now predict on the validation data set.
+predRPART <- predict(modFitRPART, newdata = validationCleaned, type="class")
+print(confusionMatrix(predRPART, validationCleaned$classe))
+```
+
+###Generalized Boosted Model
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+#First configure for parallel processing for faster processing.
+cluster <- makeCluster(detectCores() - 1)     #convention to leave 1 core for OS
+registerDoParallel(cluster)
+```
+
+```{r, message=FALSE, warning=FALSE, echo=TRUE}
+#Create a trainControl function with a 10 fold cross validation.
+fitControl <- trainControl(method = "repeatedcv", number = 10, allowParallel = TRUE)
+#Fit model to training data.
+modFitGBM <- train(classe ~ ., data=trainingCleaned, method="gbm", verbose=FALSE, trControl = fitControl)
+```
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+#Shut down the parallel cluster.
+stopCluster(cluster)
+registerDoSEQ()
+```
+
+```{r, message=FALSE, warning=FALSE, echo=TRUE}
+#Print the model accuracy.
+print(confusionMatrix.train(modFitGBM))
+```
+
+```{r, message=FALSE, warning=FALSE, echo=TRUE}
+#Now predict on the validation data set.
+predGBM <- predict(modFitGBM, newdata = validationCleaned)
+print(confusionMatrix(predGBM, validationCleaned$classe))
+```
+
+##**Selecting Best Model & Predicting on Test Data Set**
+###Selecting Best Model & Applying it to Full Test Data
+The most accurate model is the random forest model. The accuracy of the four models used in this analysis are the following.
+Random Forest:
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+print(confusionMatrix(predRF, validationCleaned$classe)$overall[1])
+```
+Linear Discriminant:
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+print(confusionMatrix(predLDA, validationCleaned$classe)$overall[1])
+```
+Decision Trees:
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+print(confusionMatrix(predRPART, validationCleaned$classe)$overall[1])
+```
+Generalized Boosted Model:
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+print(confusionMatrix(predGBM, validationCleaned$classe)$overall[1])
+```
+
+Now I will apply the random forest model to the full training data set to build the most accurate model.
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+#First configure for parallel processing for faster processing.
+cluster <- makeCluster(detectCores() - 1)     #convention to leave 1 core for OS
+registerDoParallel(cluster)
+```
+
+```{r, message=FALSE, warning=FALSE, echo=TRUE}
+#Create a trainControl function with a 10 fold cross validation.
+fitControl <- trainControl(method = "cv", number = 10, allowParallel = TRUE)
+#Fit model to training data.
+modFitRF <- train(x2, y2, data=trainingCleaned2, method="rf", trControl=fitControl)
+```
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+#Shut down the parallel cluster.
+stopCluster(cluster)
+registerDoSEQ()
+```
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+#Print the model accuracy.
+print(confusionMatrix(modFitRF))
+```
+
+```{r, echo=TRUE, eval=TRUE, warning=FALSE, fig.height = 6, fig.align='center', fig.cap="Fig. 3: A plot showing the prediction across the five classes."}
+plot(confusionMatrix(modFitRF)$table, col = confusionMatrix(modFitRF)$byclass, main = "Random Forest Prediction")
+```
+
+###Predict on Test Data with Random Forest Model
+Here I predict on the test data for the 20 test cases and report the results.
+```{r, message=FALSE, warning=FALSE, echo=TRUE}
+#Print the model accuracy.
+predict(modFitRF, testingCleaned[, (1:52)])
+
+# predict on test set
+prediction <- predict(modFitRF, testingCleaned[, (1:52)])
+
+# convert predictions to character vector
+prediction <- as.character(prediction)
+
+# create function to write predictions to files
+pml_write_files <- function(x) {
+    n <- length(x)
+    path <- "answers"
+    for(i in 1:n) {
+        filename <- paste0("problem_id_", i, ".txt")
+        write.table(x[i], file=file.path(path, filename), quote=F, row.names=F, col.names=F)
+    }
+}
+
+# create prediction files to submit
+pml_write_files(prediction)
+```
+
+##**Summary**
+In this project, I successfully quantify how well 6 participants perform barbell lifts from 20 test cases. I used a random forest to train my model on the training data provided by Velloso et al. (2013) and tested it on test data. The most accurate model has an accuracy of >99%.
+
+##**References**
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. **“Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human ’13)”**. Stuttgart, Germany: ACM SIGCHI, 2013.
