@@ -478,30 +478,78 @@ print(confusionMatrix(predGBM, validationCleaned$classe))
 
 ##**Selecting Best Model & Predicting on Test Data Set**
 ###Selecting Best Model & Applying it to Full Test Data
-The most accurate model is the random forest model. The accuracy of the four models used in this analysis are the following.
+The most accurate model is the random forest model. The accuracies and out of sample error rate of the four models used in this analysis are the following.
 Random Forest:
+
+```r
+print(confusionMatrix(predRF, validationCleaned$classe)$overall[1])
+```
 
 ```
 ##  Accuracy 
 ## 0.9935429
 ```
+
+```r
+print(1-0.9935429)
+```
+
+```
+## [1] 0.0064571
+```
 Linear Discriminant:
+
+```r
+print(confusionMatrix(predLDA, validationCleaned$classe)$overall[1])
+```
 
 ```
 ##  Accuracy 
 ## 0.7097706
 ```
+
+```r
+print(1-0.7097706)
+```
+
+```
+## [1] 0.2902294
+```
 Decision Trees:
+
+```r
+print(confusionMatrix(predRPART, validationCleaned$classe)$overall[1])
+```
 
 ```
 ##  Accuracy 
 ## 0.7653356
 ```
+
+```r
+print(1-0.7653356)
+```
+
+```
+## [1] 0.2346644
+```
 Generalized Boosted Model:
+
+```r
+print(confusionMatrix(predGBM, validationCleaned$classe)$overall[1])
+```
 
 ```
 ##  Accuracy 
 ## 0.9627867
+```
+
+```r
+print(1-0.9627867)
+```
+
+```
+## [1] 0.0372133
 ```
 
 Now I will apply the random forest model to the full training data set to build the most accurate model.
@@ -517,6 +565,11 @@ modFitRF <- train(x2, y2, data=trainingCleaned2, method="rf", trControl=fitContr
 
 
 
+
+```r
+#Print the final model accuracy.
+print(confusionMatrix(modFitRF))
+```
 
 ```
 ## Cross-Validated (10 fold) Confusion Matrix 
@@ -534,6 +587,15 @@ modFitRF <- train(x2, y2, data=trainingCleaned2, method="rf", trControl=fitContr
 ##  Accuracy (average) : 0.9952
 ```
 
+```r
+#print the final model error rate.
+print(1-0.9952)
+```
+
+```
+## [1] 0.0048
+```
+
 
 ```r
 plot(confusionMatrix(modFitRF)$table, col = confusionMatrix(modFitRF)$byclass, main = "Random Forest Prediction")
@@ -548,7 +610,7 @@ plot(confusionMatrix(modFitRF)$table, col = confusionMatrix(modFitRF)$byclass, m
 Here I predict on the test data for the 20 test cases and report the results.
 
 ```r
-#Print the model accuracy.
+#Print the model prediction.
 predict(modFitRF, testingCleaned[, (1:52)])
 ```
 
